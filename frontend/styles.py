@@ -175,6 +175,13 @@ select:focus-visible, textarea:focus-visible,
   border-radius: 4px;
 }
 
+/* 修复：移除 selectbox和stNumberInput的额外外发光框 */
+[data-testid="stSelectbox"] input:focus-visible,[data-testid="stNumberInput"] input:focus-visible {
+    outline: none !important;          /* 移除青色外发光 */
+    outline-offset: 0px !important;    /* 清除偏移量 */
+    box-shadow: none !important;       /* 防止出现阴影框 */
+}
+
 /* Status announcements (aria-live) */
 .nl-announcement {
   border: 1px solid var(--nl-line); border-left-width: 4px;
