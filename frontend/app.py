@@ -289,6 +289,7 @@ def _sidebar(st: Any, state: State) -> Any | None:
                     max_value=300.0,
                     value=float(state["api_timeout_seconds"]),
                     step=1.0,
+                    help="客户端等待后端响应的最长时间，超过即视为连接失败。",
                 )
                 apply_connection = st.form_submit_button("保存连接设置", use_container_width=True)
             if apply_connection:
@@ -659,13 +660,14 @@ def _roi_models_page(st: Any, state: State, client: Any | None) -> None:
         "ROI 编辑图像",
         list(image_by_id),
         format_func=lambda image_id: str(image_by_id[image_id].get("filename")),
+        help="ROI（感兴趣区域）：即你框选出来、准备做颗粒分析的那张图。",
     )
     image = image_by_id[active_image_id]
     analysis_roi = _mapping_or_none(image.get("analysis_roi")) or {}
     valid_rect = _mapping_or_none(analysis_roi.get("valid_rect"))
     invalid_rects = _list_of_mappings(analysis_roi.get("invalid_rects"))
     load_column, context_column = st.columns([1, 3])
-    if load_column.button("加载 / 刷新 ROI revision", use_container_width=True):
+    if load_column.button("加载 / 刷新 ROI 修订记录", use_container_width=True):
         if client is None:
             st.error("请先连接后端，再加载 ROI 框。")
         else:
@@ -735,7 +737,7 @@ def _roi_models_page(st: Any, state: State, client: Any | None) -> None:
             )
             edited_rows = rows_from_editor(edited)
             draft["rows"] = [dict(row) for row in edited_rows]
-            if st.button("保存完整 ROI revision", type="primary"):
+            if st.button("保存完整 ROI 修订记录", type="primary"):
                 validation = validate_box_rows(
                     edited_rows,
                     width=int(image["width"]),
@@ -958,6 +960,7 @@ def _model_configuration(
             ("full_image", "boxes"),
             key="recommend_roi_mode",
             format_func=display_enum,
+            help="ROI（感兴趣区域）：决定模型分析整张图，还是只看你框选的若干区域。",
         )
         target_profile = columns[1].selectbox(
             "目标特征",
@@ -968,7 +971,8 @@ def _model_configuration(
             "偏好", ("accuracy", "balance", "speed"), format_func=display_enum
         )
         device = columns[3].selectbox(
-            "设备", ("auto", "cpu", "cuda", "mps"), format_func=display_enum
+            "设备", ("auto", "cpu", "cuda", "mps"), format_func=display_enum,
+            help="选择运行模型的计算设备；auto 会自动选用本机最优的 GPU 或 CPU。",
         )
         if st.button("推荐模型", use_container_width=True) and client is not None:
             recommendation = _api_action(
@@ -1042,7 +1046,7 @@ def _model_configuration(
     run_device = options[2].selectbox(
         "推理设备", ("auto", "cpu", "cuda", "mps"), format_func=display_enum
     )
-    if st.button("创建运行", type="primary", use_container_width=True):
+    if st.button("执行分析", type="primary", use_container_width=True):
         if client is None:
             st.error("请先连接后端，再创建运行。")
             return
@@ -1232,7 +1236,10 @@ def _runs_page(st: Any, state: State, client: Any | None) -> None:
         _run_comparison_panel(st, state, client, detail, runs)
         return
 
-    selected_run_id = st.selectbox("查看运行", available_ids)
+    selected_run_id = st.selectbox(
+        "查看运行", available_ids,
+        help="运行：一次具体的模型分析任务及其结果记录。",
+    )
     run = _mapping_or_none(state.get("runs", {}).get(selected_run_id))
     if run is None:
         return
@@ -1619,6 +1626,7 @@ def _comparison_artifact_downloads(
         list(choices),
         format_func=lambda key: ARTIFACT_LABELS[key],
         key=f"comparison_artifact_choice_{_widget_key(run_id)}",
+        help="制品：后端生成的产物文件，如颗粒掩膜、统计报表、叠加预览图等。",
     )
     source = choices[selected_key]
     if st.button(
@@ -1696,7 +1704,10 @@ def _artifact_download_panel(
     }
     if not choices:
         return
-    selected = st.selectbox("准备本地下载", list(choices), key="artifact_choice")
+    selected = st.selectbox(
+        "准备本地下载", list(choices), key="artifact_choice",
+        help="制品：后端生成的产物文件，如颗粒掩膜、统计报表、叠加预览图等。",
+    )
     if st.button("获取所选制品"):
         if client is None:
             st.error("请先连接后端，再下载制品。")
@@ -1740,6 +1751,7 @@ def _review_panel(
             else None
         ),
         placeholder="仅在修改阈值时填写",
+        help="模型判定颗粒存在的置信度门槛；数值越高，只有越确定的颗粒才会被保留。",
     )
     area_enabled = st.checkbox("修改最小面积")
     inference = _mapping_or_none(run.get("inference")) or {}
@@ -1749,6 +1761,7 @@ def _review_panel(
             min_value=0,
             value=int(inference.get("min_area_px") or 0),
             step=1,
+            help="只保留面积不小于该像素值的颗粒，用于过滤细小噪点。",
         )
     )
     watershed_enabled = st.checkbox("修改分水岭设置")
@@ -1765,7 +1778,7 @@ def _review_panel(
         accept_multiple_files=False,
         key=f"corrected_mask_{run.get('run_id')}",
     )
-    if st.button("创建复核运行", type="primary"):
+    if st.button("创建复核分析", type="primary"):
         if client is None:
             st.error("请先连接后端，再创建复核运行。")
             return
@@ -1823,7 +1836,7 @@ def _export_panel(
     selected = st.multiselect(
         "纳入导出的终态运行", terminal_ids, default=terminal_ids, key="export_run_ids"
     )
-    if st.button("生成可复现 ZIP", type="primary"):
+    if st.button("生成可复现数据包", type="primary"):
         if client is None:
             st.error("请先连接后端，再执行导出。")
             return
@@ -1843,7 +1856,7 @@ def _export_panel(
         return
     st.success(f"导出包已就绪 · SHA-256 {exported.get('sha256')}")
     url = str(exported.get("download_url") or "")
-    if url and st.button("获取导出 ZIP") and client is not None:
+    if url and st.button("下载导出包") and client is not None:
         download = _download_action(st, state, client, url)
         if download is not None:
             state["prepared_export"] = {
@@ -2005,7 +2018,7 @@ def _knowledge_page(st: Any, state: State, client: Any | None) -> None:
             aliases = st.text_input("材料别名")
             license_note = st.text_area("授权 / 使用说明 *", height=80)
             allowed = st.checkbox("允许用于本次演示")
-            ingest = st.form_submit_button("摄取并建立索引", type="primary")
+            ingest = st.form_submit_button("导入并建立索引", type="primary")
         if ingest:
             if client is None:
                 st.error("请先连接后端，再摄取文档。")
