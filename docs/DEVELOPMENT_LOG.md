@@ -449,6 +449,8 @@
 
 ## 2026-07-23 11:50 +08:00 — 发布五人当前工单与统一分发任务书
 
+- 历史状态提示：本段记录当时已经发生的团队分发，不再是当前任务安排；其文档维护与分发要求已被
+  本日志后续“Streamlit 前端退役并重建 Next.js 科研 Command Center”条目的文档权威决策取代。
 - 发布基线：以 `main@3900aad8eed80fd794ca4b7b38c5da916df9573f` 和
   [Actions run 29953751731](https://github.com/Yukun-Zheng/NanoLoop-Agent/actions/runs/29953751731)
   四项全绿为已验收发布点；远端只保留长期分支 `main`，后续仍从最新全绿 `origin/main` 开短期分支。
@@ -462,3 +464,208 @@
   面向 `main` 的 PR；仍不得直接推送 `main`、自行合并 PR、删除分支、修改仓库设置或操作他人分支。
 - 文档同步：同步更新文档索引、开发指南、RAG 主线说明、郭境濠专项指南、历史审计提示和团队集成
   快照；本批只提升任务可执行性，不改变 M1 工程 MVP / 内部 Alpha 的能力等级。
+
+## 2026-07-23 15:35 +08:00 — 接入 Large U-Net 真实运行权重
+
+- 输入资产：接收郭境濠的 `ModelAssets-large.zip`，包 SHA-256 为
+  `56b46920cd6304fc2774ebd8cfeaf9997144bbaaf5b5854ba4d7ebbb7911dbd1`。配置和模型卡与仓库
+  现有冻结契约一致；源 checkpoint SHA-256 为
+  `5c5dbcae61f40f8eb1fef27c7b69592a727260898330abc546f7e7a6833035bd`，部署用 TorchScript
+  SHA-256 为 `007d9a16bf31e5f960160c52eefa938b83feeac2e6c0d7dec9c8670a38626e05`。
+- 接入策略：仓库只跟踪运行必需的 13,505,917 字节 TorchScript，不重复跟踪 13,421,286 字节
+  source checkpoint；registry 锁定权重哈希并把 Large authored status 调整为 `ready`。缺 Torch
+  optional dependency、缺文件或哈希漂移时，运行时仍会强制降为 `unavailable`。
+- 独立运行检查：以 PyTorch 2.13.0 CPU 加载 TorchScript，两次
+  `[1,1,512,512] float32` 推理均输出有限的同尺寸 logits，最大重复差为 `0.0`；source checkpoint
+  使用 `weights_only=True` 安全读取，包含 56 个 tensor、3,349,697 个参数且浮点值均有限。另以
+  2048×1536 合成 SEM 形态输入走完整 `ModelRegistryService → snapshot → InferenceGateway →
+  UNetAdapter`，CPU 用时 12.740 秒，输出概率范围 `[0.0, 0.9996311]`、mask/probability 尺寸正确，
+  底部 180 px 前景为 0；合成输入只验证工程链路，不构成科学准确率证据。
+- 证据边界：ZIP 未包含模型/数据许可与 custody ledger、固定 source/sample split、SEM/GT、
+  calibration/test JSON/CSV 或目标部署完整 Analysis 运行记录。Large 因此是“运行就绪、科学验收
+  待完成”；开发者报告指标继续保留为未独立复现，FR-06 从 `external-blocked` 上调为 `partial`，
+  项目等级仍为 M1。
+
+## 2026-07-23 — Streamlit 前端退役并重建 Next.js 科研 Command Center
+
+- 分支：`feat/e-command-center-next-v1`，从 `origin/main` 创建；本条只记录当前实现事实，合入与发布
+  仍以该提交自己的 GitHub Actions 结果为准。
+- 文档权威：项目负责人已暂停个人分发文档；v4.0/v3.0 保留为历史团队快照且未随本次前端改写。
+  当前事实入口调整为代码、README、开发指南、需求追踪矩阵和本日志。
+- 完整替换：删除 Python Streamlit 页面、组件、前端专用 Python 测试和 `Dockerfile.frontend`；
+  独立 smoke/运维脚本仍需的 HTTP 客户端迁移到 `scripts/nanoloop_api_client.py`，不再让 Python
+  工具依赖 UI 包。
+- 新前端：采用 Node.js 24、pnpm 10、Next.js 16、React 19、TypeScript 5、Tailwind CSS 4、
+  TanStack Query、Zod、Zustand 与 React-Konva。公开路由为任务启动页 `/`、工作区
+  `/workspace/{job_id}`、知识库 `/knowledge` 和进程探针 `/api/healthz`；三栏工作区覆盖项目、
+  ROI、模型/运行、时间线、结果/复核/导出与 Agent 查询。
+- 信任边界：浏览器只访问同源 `/api/nanoloop/*`。Next.js BFF 使用严格路径/方法允许列表，把请求
+  映射到服务端 `NANOLOOP_API_INTERNAL_URL` 的 FastAPI `/api/v1`，剥离浏览器 Cookie、
+  Authorization 和 API Key，再注入服务端 `NANOLOOP_API_KEY`；不跟随上游重定向，不接受任意
+  制品 URL。前端只展示/编排后端科学结果，不在浏览器重算颗粒指标。
+- 合同与门禁：OpenAPI 快照生成 TypeScript schema 并执行漂移检查；Vitest 覆盖 BFF、错误信封、
+  元数据、ROI 坐标、时间线、近期任务和查询证据，Playwright Chromium 使用同源 API mock 覆盖
+  创建任务→选择 ready 模型→创建运行→时间线→作用域问答。CI 新增独立前端质量任务，并构建
+  Node standalone 非 root/只读容器，经 BFF 检查 FastAPI 健康；`make frontend-check` 和
+  `make frontend-e2e` 是本地入口。
+- 部署变化：Compose 前端端口由 `8501` 改为 `3000`，使用
+  `NANOLOOP_API_INTERNAL_URL=http://api:8000`；`NANOLOOP_API_KEY` 与内部 URL 均为服务端变量，
+  不得使用 `NEXT_PUBLIC_*`。当前只支持单 Next.js 服务身份，不等于交互式用户登录或完整多租户。
+- 本地工程证据：生产依赖审计无已知漏洞，OpenAPI TypeScript 漂移、ESLint、严格 TypeScript、
+  16 个 Vitest 文件共 79 项测试和 Next.js standalone 生产构建全绿；Playwright Chromium 通过
+  4 个场景，包括“创建项目 → ROI revision 保存/重载 → ready/unavailable 模型 → 运行 →
+  质量/结果 → 复核子运行 → mixed query → signed export SHA-256”闭环、响应式审查器，以及
+  真实 409 revision 冲突下保留未保存 ROI 并提供重载/复制恢复操作；知识库场景覆盖 Markdown
+  导入、列表刷新、停用/启用和强制重建索引。Python 侧 Ruff、严格 Mypy、
+  OpenAPI、1089 项 Pytest、Alembic 往返与 ORM 漂移全绿，`docker compose config --quiet` 通过。
+  本机前端镜像冷构建仅因 Docker Hub `node:24.18.0-bookworm-slim` manifest 请求网络超时未完成，
+  未观察到 Dockerfile 编译失败；容器结论仍须由本提交自己的 GitHub Actions 给出。
+- 验收边界：mock 浏览器场景和工程构建不证明目标后端、Large U-Net 科学性能、多模型共同图像、
+  正式 RAG 语料/embedding 或知识租户隔离。旧前端的 live ROI round-trip 不能自动转移到重写版本；
+  仍需在目标环境完成真实后端 ROI、制品、复核、导出、RAG 和错误/降级路径验收。
+
+## 2026-07-23 19:26 +08:00 — 合并当前主线并审计 Large A/B 模型交付
+
+- 主线收束：RAG 正式知识卡与可复现摄取 [PR #18](https://github.com/Yukun-Zheng/NanoLoop-Agent/pull/18)、
+  Small-A 私有资产合同 [PR #19](https://github.com/Yukun-Zheng/NanoLoop-Agent/pull/19) 和 Next.js
+  Command Center [PR #20](https://github.com/Yukun-Zheng/NanoLoop-Agent/pull/20) 已依次合入 `main`，
+  源分支删除；合并后 `main` 的
+  [Actions run 30002138826](https://github.com/Yukun-Zheng/NanoLoop-Agent/actions/runs/30002138826)
+  全绿，包括 Python 3.11/3.12、Ruff/严格 Mypy/OpenAPI/Alembic、Next.js lint/type/unit/build/
+  Playwright，以及 API + Next.js 双容器、备份恢复冒烟。
+- 新交付：审计 `ModelAssets-large-a.zip`（SHA-256 `4173d797...d4815`）、
+  `ModelAssets-large-b.zip`（`c23a1000...06351`）和独立评估 tar（`5f2de1c2...5b2b8`）。
+  三包无路径穿越、链接、加密成员或解压炸弹；Large-A/B 中的 TorchScript 与仓库现有
+  `007d9a16...26e05` 权重逐字节相同。Large-B 是同一模型的 B 模块后处理/验收包，不新增
+  `model_id`。
+- 独立复核：直接读取外部交付中的三张历史 prediction 和人工 GT，重算全部像素混淆计数及
+  Dice/IoU/Precision/Recall；结果与 JSON/CSV 完全一致。清洗后的哈希、计数、指标和限制进入
+  `model_artifacts/evidence/unet-large-optimized-v1/delivery-audit-2026-07-23.json`，测试会从计数
+  再计算逐图、Macro 和 Micro 指标。
+- 未覆盖当前科学合同：历史运行的 weight 与当前一致，但 Adapter/config/card 摘要不同，执行
+  Git commit 未记录；threshold 报告未从概率数组独立重算，min-area 缺完整机器证据。因此 registry
+  的 `ready` 仍只表示 runtime，`evidence_bundle_delivered=false`，科学验收保持 pending。
+- 公开仓库最小化：三包没有模型/数据再分发授权；原始 TIF 还含仪器序列号、采集时间、内部路径和
+  台面坐标，JSON/SQLite 含服务器路径。未提交原图、GT、概率、SQLite、重复权重/checkpoint、派生
+  误差图或包内旧脚本；只提交不含私有二进制的审计事实。后续需补许可/custody、split、tolerance
+  policy，并使用当前 bundle 在目标环境完成完整 Analysis 重跑。
+
+## 2026-07-23 — 接入 Small-A 真实运行权重
+
+- 输入资产：接收郭境濠的 `ModelAssets-small-a.zip`，包大小 24,964,343 字节、SHA-256
+  `b88da3904b7e03d20779088df24838d794e0cb29b17d75547ed4d0479182a5fe`。包内源 checkpoint
+  `best_unet_small.pth` 的 SHA-256 为
+  `915911107c82c01ff7d37746f4fcce6db39d40659cfb93e059e14b18134ba008`；使用
+  `weights_only=True` 安全读取后，128 个 tensor key 与仓库 `small_batchnorm` 架构严格匹配，
+  missing/unexpected/shape mismatch 均为空，3,355,667 个参数/状态元素全部有限。
+- 兼容性修复：交付 TorchScript `e31bd710...d6d28` 在 PyTorch 2.13.0 下与 eager 输出完全一致，
+  但在项目支持下限 PyTorch 2.6.0 下因序列化的
+  `aten::_upsample_lanczos2d_aa` 无法载入。使用当前仓库导出器和同一 checkpoint 在 PyTorch
+  2.6.0 CPU 重导出兼容制品，最终提交的 13,560,272 字节权重 SHA-256 为
+  `09d1818c72652179e2590897cf409f7691e18e5e1a0f55476f90f7369a03171d`。该制品在 2.6.0 与
+  2.13.0 均可加载；eager、原交付制品与兼容制品两两最大绝对误差均为 `0.0`。
+- Linux 制品检查：把最终权重只读挂载到一次性 Debian 12 Linux ARM64 容器，在 Python 3.12.13
+  与 `torch 2.6.0+cpu` 下再次核对仓库 SHA、载入并执行 `[1,1,256,256]` float32 forward；输出
+  全部有限，两次推理最大绝对差 `0.0`。该检查不包含完整目标主机 Gateway/Analysis 性能验收。
+- 工程验证：真实 registry → 内容寻址 snapshot → `InferenceGateway` → `UNetAdapter` 链路在
+  CPU 上完成全图两次确定性推理和 BOXES ROI；输出尺寸/有限性、底部 130 行清零、框外清零、
+  bundle 冻结、health 与显式 unload 均通过。使用的是确定性合成工程图，只证明接入合同，不是
+  模型准确率或材料科学证据。
+- 状态与边界：Small registry 从 `unavailable` 上调为运行 `ready`，与 Large 一起形成两个真实
+  U-Net 工程候选；Agglomerated U-Net、YOLO-Seg、SAM2 仍为 `unavailable`。交付未含授权 SEM/GT、
+  Small-B 测试与校准、像素/实例指标、目标 Linux 完整 Analysis 记录或独立许可/custody 台账，
+  因此 Small 科学验收继续为 pending，FR-06/FR-12 不上调为 `implemented`。
+- 公开仓库策略：只提交兼容运行权重和不含私有路径/图像的审计事实，不提交 ZIP、checkpoint 或
+  重复脚本。项目负责人已明确要求把该模型接入并推送本仓库；该要求不推定第三方再分发、商业使用
+  或再许可权利。
+
+## 2026-07-23 — 修复 CPU 模型容器的可重复部署
+
+- 目标机复现：`models` 构建通过 PyPI 宽泛解析选中 `torch 2.13.0`，并在 Linux ARM64 CPU
+  容器中继续解析 CUDA 13 组件；此前 8 GiB、无 swap 且存在重叠构建的 Colima 环境中，构建进程
+  曾以 137 被终止。137 只证明进程收到 `SIGKILL`，历史日志不足以单独证明内核 OOM。
+- 依赖修复：Docker `models` profile 现在从 PyTorch 官方 CPU wheel index 预取并约束
+  `torch 2.13.0`/`torchvision 0.28.0`。最初按 Small-A 的 Linux ARM64 运行下限尝试 2.6，
+  但真实 Large 推理暴露其 TorchScript 依赖较新的
+  `aten::_upsample_lanczos2d_aa`；因此项目 `models` extra 的统一下限同步提升至 2.13。
+  默认轻量镜像仍不安装模型依赖。
+- 调度修复：`make compose-up-models` 改为先单独构建 API、再构建前端、最后
+  `docker compose up --no-build`，并显式限制 Compose 并行度，避免使用者重复触发两个重型构建。
+  `make install-models` 也使用同一版本约束；Linux 先从官方 CPU index 预取，避免宿主开发安装
+  重复触发 CUDA 依赖解析。
+- 健康检查修复：Compose 前端探针改用 Node `-e` 执行内联 `fetch`；此前误用 `-c`，会把健康
+  检查脚本当成本地文件名，导致页面可访问但容器被错误标记为 unhealthy。
+- 端口冲突修复：验收时发现旧 `NanoLoop-Agent-rag` 宿主 `uvicorn` 占用 `127.0.0.1:8000`，
+  导致终端与 Next.js BFF 分别命中宿主和容器 API。停止旧进程并重建 Compose 服务后，
+  `3000`/`8000` 均由当前 Colima 转发接管，前端与命令行共享同一持久状态。
+- 目标验收：在 12 GiB Colima 上重新构建 CPU-only API，验证双容器健康、Large/Small-A 为
+  `ready`、其余未交付模型保持 `unavailable`，完成前端 BFF 健康请求，并用真实 Large 样例
+  贯通上传、推理、形貌指标和结果制品。最终 Docker CPU 运行使用
+  `SrZr-3.tif`（2048×1536，SHA-256
+  `9bfd594fff30dce6b898281c6e9f4cb84a0183ba82c8d974f38a510a9092d885`），耗时 9,908 ms，
+  输出 2 个颗粒、平均等效粒径 152.026 px、覆盖率 1.31%、数量密度
+  `7.201788348082596e-07 px^-2`、周长密度 `0.000463944323536875 px^-1` 和 8 类运行制品。
+  唯一质量警告是样例未提供物理尺度，因此没有推测 nm/µm 指标。
+
+## 2026-07-24 — 合入 RAG 完整查询并完成本机全功能 UI 验收
+
+- 主线基线：PR
+  [#23](https://github.com/Yukun-Zheng/NanoLoop-Agent/pull/23) 已合入 `main@c0f435c`，补齐受管
+  知识检索、统一 data/knowledge/mixed query、引用与确定性报告导出合同。本轮没有更新已暂停的
+  v4/v3 分发文档，只更新 operational docs、公开验收资产、图文指南和事实报告。
+- 公开输入：新增由 `scripts/generate_acceptance_fixture.py` 确定性生成的 2048×1536 合成工程图
+  `nanoloop_ui_acceptance_fixture.png`（SHA-256 `5827ef54...3d7876`）和二值修正掩码
+  `nanoloop_ui_acceptance_corrected_mask.png`（`51adb54a...2e7d`）。两者无外部/私人 SEM 像素和
+  仪器元数据，只用于工程验收，不作为 GT、模型准确率或材料科学证据。
+- 实际运行方式：前端从当前 `main` 重建；完整 API 镜像重建在拉取外部 PyTorch CPU wheel 时
+  遇到网络超时，因此复用已经验证的 CPU-only `nanoloop-agent:local` runtime，并通过临时 Compose
+  overlay 把当前 `app/` 只读挂载进容器。这证明了当前源码与已验证模型 runtime 的 live 联动，
+  但不等于一次干净、无缓存、不可变发布镜像冷构建；该 overlay 未提交仓库。
+- 双模型任务 `job_19d2fd8b19e24eaaab33f4de48ec44bf`：Large
+  `run_f90c7ba5848b4071aef56272a12bf4ec` 完成 24 颗粒、平均等效粒径 86.356 px、覆盖率
+  5.29%、11,720 ms；Small-A `run_90c1010ec2b047b7a216af2cf78de549` 完成 75 颗粒、
+  29.232 px、2.78%、12,700 ms。两者在同一公开图上完成时间线、图层、统计与浏览器并排工程
+  比较；由于缺物理尺度，均以 `physical_scale_missing_pixel_metrics_only` 诚实降级。
+- ROI 与人工复核：保存 `中央颗粒区域` 的 `[256,192,1792,1200)` 原图半开坐标为 revision 1；
+  由于当前两个 U-Net 不声明 box prompt，本轮真实推理仍使用 `full_image`，不得把 ROI 持久化验收
+  冒充 ROI 参与推理。以 threshold 0.55 和修正掩码创建子运行
+  `run_7cda816d42ef4f4ea2de9049e494c5fc`，父运行、`manual_corrected_mask`、配置与制品关系均可
+  从科学审查器追溯，父运行没有被覆盖。
+- 数据与知识 Agent：精确单指标问题“颗粒数是多少？”返回 `get_metric` 参数、单位与逐 run
+  明细；精确材料标签任务 `job_91a0218cdc9e493fa0a31df63d12fbea` 用 `material_name=LaNi`
+  成功返回页码/chunk 引用，拒绝“忽略文献并编造催化性能”，并在 mixed 模式同屏给出 24 颗粒
+  数据结论和知识引用。第一任务把材料名称写成长句时，严格材料标签过滤按设计返回证据不足；
+  图文指南因此明确要求知识演示使用登记别名 `LaNi`。
+- 本机受管知识库：导入项目自制
+  `demo_data/rag/sources/project_sample_context.md`（SHA-256 `3226e75b...05e4b`），许可证字段、
+  规范引用、停用/启用和强制重建均通过。SQLite 最终只读回查为 1 份 `ready` 文档、6 chunks、
+  6 FTS5 条目和 12 条 query log。`rag_index` 仍为
+  `retrieval=degraded, provider=healthy, fallback=healthy`；关键词检索通过，固定 embedding/FAISS
+  向量检索未通过。本机全局 Docker volume 不是 tenant 私有数据库，principal knowledge 仍
+  fail closed。
+- 可信导出：浏览器显示“SHA-256 已验证，可信报告已下载”；11 MB ZIP 的 SHA-256 为
+  `8fcd0d2b078d8d93cc50c6b1fadde88940d6e81136bf2e75ce47922a156415fc`，`unzip -t`
+  通过，26 个成员覆盖 manifest、原图、预测/实例/颗粒制品、质量、运行配置、provenance、
+  query history 和 RAG citations。下载 ZIP 不进入仓库。
+- 回归：Agent/query/RAG/report/smoke 107 项、HTTP 合同 3 项、MVP 与文件存储/导出 52 项，
+  合计 **162 passed、0 failed**；公开 fixture 与修正掩码可重复生成且字节一致，生成脚本 Ruff
+  通过。当前仍为 M1：授权 SEM/GT 科学准确率、Small-B、Agglomerated/YOLO/SAM2、正式向量
+  runtime、知识租户隔离、目标服务器 TLS/身份/长期并发与干净发布镜像仍未验收。
+- 用户入口：新增[图文测试与演示指南](USER_ACCEPTANCE_GUIDE.md)和
+  [2026-07-23/24 事实验收报告](acceptance-report-2026-07-23.md)；截图只显示项目自制公开资产，
+  已去除个人浏览器标签、书签、头像和私人显微图像。
+
+## 2026-07-24 — 响应 PostCSS 安全公告并恢复前端门禁
+
+- 触发事实：图文验收批次的 GitHub Actions run `30028955174` 中，Python 3.11、Python 3.12
+  及 Ruff/Mypy/OpenAPI/Alembic 均通过；前端任务在执行代码检查前被生产依赖审计阻断。根因是
+  `GHSA-6g55-p6wh-862q` 新披露的 PostCSS 任意文件读取/信息泄露问题，受影响版本为
+  `<=8.5.11`，仓库当时通过 pnpm override 固定在 `8.5.10`。
+- 修复范围：只把现有 PostCSS override 和锁文件解析从 `8.5.10` 提升到当前补丁版本
+  `8.5.22`；Next.js、React、Tailwind 和其他直接依赖均未升级，避免把安全修复扩大成无关的依赖
+  迁移。
+- 本地证据：使用仓库声明的 Node 24 与 pnpm 10.34.5 从锁文件安装后，`pnpm audit --prod`
+  报告无已知漏洞；OpenAPI TypeScript 生成结果无漂移，ESLint、严格 TypeScript、17 个 Vitest
+  文件共 82 项测试和 Next.js production build 全部通过。
+- 发布状态：本条所在提交推送后仍必须由新的 GitHub Actions run 复验；旧 run 的失败结论保留，
+  不通过隐藏或跳过审计来制造全绿。

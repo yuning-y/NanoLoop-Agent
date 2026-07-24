@@ -1,19 +1,22 @@
 # 生产就绪说明
 
-本文描述最新全绿 `main`（五人集成快照 `bfb48d4`）可以安全承诺的部署边界。当前发布等级是
+本文描述当前 `main` 基线及本次 Next.js 前端替换可以安全承诺的部署边界；任何待合并提交仍须以
+自身 CI 结果为准。当前发布等级是
 **M1 工程 MVP / 内部 Alpha**：适合受信任网络内的单机开发、合同测试和诚实降级演示，
-但还不是经过真实模型、真实语料和固定独立集验证的科学产品 MVP；M2/M3 的完整退出条件见
-[v4.0 协同开发文档](NanoLoop_Agent_协同开发规格与接口总文档_v4.0.md)。
+但还不是经过共同授权 SEM/GT、正式语料和固定独立集验证的科学产品 MVP；当前退出条件见
+[需求追踪矩阵](requirements-traceability.md) 和本文“发布门槛”。v4.0 分发快照不再作为当前
+发布事实入口。
 
 ## 当前发布结论
 
 | 场景 | 当前结论 | 主要依据 / 阻塞 |
 | --- | --- | --- |
 | 本机或受信任内网、单 API 实例 | 支持 | [Compose](../docker-compose.yml) 默认回环绑定；SQLite WAL、持久 `QUEUED` 行、原子领取和有界 worker pool 已实现；历史快照 `16456a3` 的 CI 已真实构建并启动 API/frontend 双容器，当前 `main` 仍须以自身 CI 为准。 |
-| 无外部模型/语料的诚实降级启动 | 支持 | 模型保持 `unavailable`，RAG 可保持 keyword-only/unavailable，健康接口不会把缺失资产报告为正常科学闭环。 |
-| 六页 Streamlit 工程工作台 | 支持 | 六页 AppTest 与容器启动已通过；真实业务演示仍受模型和 RAG 外部资产阻塞。 |
-| 人工矩形 ROI 编辑 | 支持 | 前端内置离线 canvas 与同步数值编辑器；单元测试覆盖坐标/载荷，本地 headless Chrome 已验证拖拽、CAS 保存、重载与 REST revision round-trip。 |
-| 真实 SEM 分割与模型对比演示 | 阻塞 | 没有真实 checkpoint、共同 fixture、模型卡评测和冷启动证据，见 [FR-06](requirements-traceability.md)。 |
+| 缺少可选模型/语料时的诚实降级启动 | 支持 | 已接入 Large 与 Small 两个 U-Net bundle，可分别保持 `ready`；缺失的 Agglomerated U-Net、YOLO-Seg 和 SAM2 保持 `unavailable`，RAG 可保持 keyword-only/unavailable，健康接口不会把缺失资产报告为正常科学闭环。 |
+| Next.js 科研 Agent Command Center | 工程可用 | `/`、`/workspace/{job_id}`、`/knowledge` 与严格同源 BFF 已实现；Vitest/Playwright/生产构建和非 root 容器门禁已进入 CI。2026-07-23/24 已在本机真实后端、两个真实 U-Net bundle 与公开合成工程图上完成一次 live UI 验收；目标主机、正式发布镜像和科学资产仍需另验。 |
+| 人工矩形 ROI 编辑 | 工程可用 | React-Konva 与数值编辑器使用原图半开坐标、有效区校验和 revision CAS；纯几何有单测，本机 live 保存 revision 1 并刷新回读通过。仍需目标环境的多浏览器、拖拽手感与真实 409 并发冲突矩阵；当前两个 ready U-Net 的本轮运行是 `full_image`。 |
+| 真实模型单图分割 | 部分可用 | Large 与 Small TorchScript 均通过 CPU 载入、有限输出、重复推理及真实 Gateway 生命周期检查，并在公开合成图完成真实 Analysis、制品和浏览器显示。Large 的历史三视野 prediction/GT 像素指标已独立复核；Small 尚无 Small-B 独立测试集和科学指标。两者都仍缺完整许可/资产台账、共同授权 SEM/GT 的当前 bundle 科学重跑与目标部署干净冷启动，见 [FR-06](requirements-traceability.md)、[Large A/B 审计](model-assets-large-a-b-acceptance-2026-07-23.md)、[Small-A 审计](model-assets-small-a-acceptance-2026-07-23.md)与[本机验收](acceptance-report-2026-07-23.md)。 |
+| 真实多模型对比演示 | 工程可用、科学阻塞 | Large 与 Small 两个真实 U-Net bundle 已在同一公开合成图创建独立运行，并在浏览器并排展示质量、统计、耗时和 overlay；但尚未在共同授权 SEM/GT 上执行预先定义的科学容差验收，不能宣称真实多模型科学对比或“最佳模型”已经确定。 |
 | 生产向量 RAG | 资产阻塞 | FTS5 与引用摘录是稳定基线；可选向量 runtime 已实现持久恢复、模型/维度/数据库映射、原子发布和降级测试，但没有固定真实 embedding 模型与正式许可语料完成资产级验收。 |
 | 公网或多租户服务 | 不支持 | 可撤销 principal credential、Analysis/Query tenant scope，以及 subject-bound file-token v2、artifact registry 与 pinned-fd 下载已接通；但知识文档租户化、分布式限流、调用/磁盘 quota 和 retention 尚未完成。 |
 | 多 Uvicorn worker / 多 API replica | 不支持 | SQLite 写协调、进程内 dispatcher、Adapter 缓存和导出协调按单进程/单 API 实例设计。 |
@@ -96,6 +99,8 @@ operator attention 并拒绝创建 JSON-only 子运行，避免把不可复现�
 
 - Compose 默认将 API/前端绑定到宿主机 `127.0.0.1`；
 - API/前端容器以非 root、只读根文件系统运行，并使用受管数据卷；
+- 浏览器只访问 Next.js 同源 `/api/nanoloop/*`；BFF 使用路径/方法允许列表，剥离浏览器凭据，
+  仅从服务端环境读取内部 FastAPI 地址与 API Key，并拒绝任意上游重定向；
 - 整体请求体在 multipart 解析前受 `MAX_REQUEST_MB` 限制，每文件另有独立上限；
 - analyses、知识摄取和 corrected-mask 的 multipart 在 FastAPI 字段绑定前分别限制文件数、文本字段数、
   允许名称/类型/基数和 256 KiB 文本 part，策略拒绝使用统一 JSON 错误信封；
@@ -136,15 +141,20 @@ operator attention 并拒绝创建 JSON-only 子运行，避免把不可复现�
 
 ```bash
 make check
+make frontend-check
+make frontend-e2e
 docker compose config --quiet
 ```
 
-当前本地 ROI browser smoke 已在 headless Chrome 完成。合并前历史代码快照 `16456a3` 的
+旧前端的 browser smoke 不自动证明本次重写。新的 Playwright 场景使用同源 API mock 覆盖科研
+工作流、ROI CAS、响应式审查器和知识库生命周期；2026-07-23/24 已再用当前 Next.js、真实本机
+FastAPI/SQLite、真实 Large/Small-A bundle、公开合成图和项目自制知识卡完成 live 工程联调，见
+[图文指南](USER_ACCEPTANCE_GUIDE.md)和[事实报告](acceptance-report-2026-07-23.md)。该结果仍不
+证明正式目标主机、干净发布镜像、租户知识隔离、完整向量 RAG、授权 SEM/GT 或科学准确率。
+合并前历史代码快照 `16456a3` 的
 [GitHub Actions run 29848825904](https://github.com/Yukun-Zheng/NanoLoop-Agent/actions/runs/29848825904)
-已全绿，覆盖 Ruff、严格 Mypy、OpenAPI/Alembic、Python 3.11/3.12 的 1098 项 Pytest、六页
-Streamlit、API/frontend 双容器构建与非 root 启动，以及离线备份、fresh-root 恢复和恢复后服务检查。
-这证明仓库工程链路可运行，仍不代表目标主机容量、长期运行或真实模型/语料闭环已经验收；每个待发布
-提交还必须通过自己的 CI。
+已全绿，证明当时的 Python、API/frontend 容器与备份恢复工程链路可运行；它不证明当前 Next.js
+代码、目标主机容量、长期运行或真实模型/语料闭环已经验收。每个待发布提交还必须通过自己的 CI。
 
 科学演示在此基础上还必须满足：
 

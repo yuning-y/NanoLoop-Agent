@@ -1,15 +1,17 @@
 # 模型与 RAG 后续接入交接
 
-本文是 v4.0 的模型/RAG 专项合同，事实基线为最新全绿 `main`，五人集成快照为 `bfb48d4`；人员任务、依赖顺序和里程碑以
-[v4.0 协同开发文档](NanoLoop_Agent_协同开发规格与接口总文档_v4.0.md) 为准。公共 DTO、REST 路径和
-持久化约束以当前 `app/contracts`、OpenAPI 与 ADR 为准；本交接不授权通过伪造 ready 状态、测试输出
+当前工程事实以 `main`、可执行代码、OpenAPI、ADR、
+[需求追踪矩阵](requirements-traceability.md) 和[开发日志](DEVELOPMENT_LOG.md)为准。公共 DTO、
+REST 路径和持久化约束以当前 `app/contracts`、OpenAPI 与 ADR 为准。
+[v4.0 协同开发文档](NanoLoop_Agent_协同开发规格与接口总文档_v4.0.md) 是已暂停维护的历史团队
+分发快照，只用于追溯当时人员任务、依赖顺序和里程碑。本交接不授权通过伪造 ready 状态、测试输出
 或引用来绕过验收。
 
 ## 1. 当前真实状态
 
 | 子系统 | 已有接缝 | 尚未交付 |
 | --- | --- | --- |
-| 模型 | `InferenceGateway`、三类 Adapter、`AdapterCache.lease()` 并发保护、注册表健康校验、不可变运行、统一后处理、canonical `pred_mask.png`/`instances.json` 和过滤前边界诊断已接通。正常运行的 schema v3 冻结原图/尺度、resolved 科学设置及权重/配置/模型卡/Adapter 源码完整 bundle；执行时核对 build identity 并单独保存实际设备/seed/后端证据。U-Net 已有灰度/百分位预处理、底部无效区和 overlap tiling；Large/Agglomerated 另有校准、独立评测和真实 Analysis smoke 工具，每次状态转换写入事件时间线。 | `model_artifacts/weights` 无真实 checkpoint；Small/Large/Agglomerated U-Net、YOLO-Seg、SAM2 五项均为 `unavailable`。郭境濠 ZIP 未交付完整私有 bundle、资产/许可台账、无泄漏 split manifest 或机器可读运行证据；卡片中的开发者报告指标尚不能归因到当前整合源码，也没有真实 fixture 推理或冷启动结果。 |
+| 模型 | `InferenceGateway`、三类 Adapter、`AdapterCache.lease()` 并发保护、注册表健康校验、不可变运行、统一后处理、canonical `pred_mask.png`/`instances.json` 和过滤前边界诊断已接通。正常运行的 schema v3 冻结原图/尺度、resolved 科学设置及权重/配置/模型卡/Adapter 源码完整 bundle；执行时核对 build identity 并单独保存实际设备/seed/后端证据。U-Net 已有灰度/百分位预处理、底部无效区和 overlap tiling。2026-07-23 接入 Large 与 Small 两个 TorchScript，安装 `models` 依赖且 bundle 校验通过时均登记为 `ready`。Large 的历史三视野 prediction/GT 像素指标已独立重算，见 [Large A/B 审计](model-assets-large-a-b-acceptance-2026-07-23.md)；Small 的 128-key 严格加载、在 Torch 2.6.0 与 2.13.0 上分别验证的兼容重导出、数值一致性与真实 Gateway 全图/BOXES 冒烟已记录在 [Small-A 审计](model-assets-small-a-acceptance-2026-07-23.md)。 | 两项 `ready` 只表示运行就绪。Large 历史运行绑定的 Adapter/config/card 与当前 `main` 不同；Small 尚无 SEM/GT、Small-B 校准或科学指标。两者仍缺完整资产/许可台账、当前 bundle 的共同授权 fixture Analysis 重跑及目标部署冷启动验收。Agglomerated U-Net、YOLO-Seg 和 SAM2 三项仍为 `unavailable`；真实双模型科学闭环仍未成立。 |
 | RAG | 文档摄取/切块、SQLite FTS5、RRF、严格材料标签、多材料澄清、摘录/OpenAI-compatible 提供器、引用 provenance 与文档启停已实现。页数/字符/chunk/别名/向量语料有界，embedding 分批。可选向量 runtime 已接通 local-files-only SentenceTransformers、不可变 FAISS generation、原子 manifest、数据库映射校验和失败降级。 | 当前环境没有固定真实 embedding 模型及经许可并覆盖演示材料的正式语料包；fake backend 门禁不能替代真实资产的重启/检索冒烟，因此不得宣称生产向量 RAG 已交付。 |
 
 关键入口：
@@ -180,13 +182,11 @@ SentenceTransformers provider、不可变 FAISS generation、原子 manifest、�
 ## 4. 合并前统一门禁
 
 ```bash
-.venv/bin/ruff check .
-.venv/bin/mypy app frontend
-.venv/bin/pytest -q
-.venv/bin/python scripts/check_frontend.py
-.venv/bin/python scripts/generate_openapi.py
-git diff --exit-code -- docs/api/openapi-v1.json
-PYTHON_BIN=.venv/bin/python ./scripts/check_migrations.sh
+make check
+make frontend-check
+make frontend-e2e
+docker compose config --quiet
+git diff --check
 ```
 
 最后在干净环境运行不带 `--allow-degraded` 的科学 smoke。只有真实模型至少一项 ready、正式语料已摄取、引用可追溯、运行和导出全部成功，才能把 FR-06/FR-09 的状态上调；仅通过降级 smoke、fake 测试或健康接口启动不构成验收。

@@ -1,5 +1,8 @@
 """Tests for deterministic query classification and clarification."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from app.agent.router import QueryRouter
@@ -13,10 +16,14 @@ from app.contracts.queries import MaterialContext
         ("哪组颗粒数密度最高？", QueryType.ANALYSIS_DATA),
         ("SrNi 有哪些已知应用和文献？", QueryType.MATERIAL_KNOWLEDGE),
         ("已有研究怎么说，我们这批覆盖率最高吗？", QueryType.MIXED),
+        ("这个材料可以在什么领域发挥作用？", QueryType.MATERIAL_KNOWLEDGE),
+        ("A 位缺位为什么可能促进析出？", QueryType.MATERIAL_KNOWLEDGE),
+        ("当前平均粒径较大，是否可能与高温粗化有关？", QueryType.MIXED),
     ],
 )
 def test_classifies_frozen_signal_groups(question: str, expected: QueryType) -> None:
-    decision = QueryRouter().classify(question)
+    context = MaterialContext(name="LaNi") if "这个材料" in question else None
+    decision = QueryRouter().classify(question, material_context=context)
 
     assert decision.query_type == expected
     assert not decision.needs_clarification
@@ -43,3 +50,34 @@ def test_unknown_intent_requests_clarification_without_guessing() -> None:
     assert decision.query_type == QueryType.AUTO
     assert decision.needs_clarification
     assert decision.confidence == 0
+
+
+def test_curated_questions_route_from_auto_without_using_expected_type_as_input() -> None:
+    questions_path = (
+        Path(__file__).resolve().parents[3] / "demo_data" / "rag" / "questions.jsonl"
+    )
+    records = [
+        json.loads(line)
+        for line in questions_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    observed: dict[str, QueryType] = {}
+    for record in records:
+        raw_context = record.get("material_context")
+        context = MaterialContext.model_validate(raw_context) if raw_context else None
+        observed[record["query_id"]] = QueryRouter().classify(
+            record["question"],
+            material_context=context,
+        ).query_type
+
+    assert len(observed) == 30
+    assert {
+        query_id: query_type.value
+        for query_id, query_type in observed.items()
+        if query_type.value
+        != next(
+            record["query_type"]
+            for record in records
+            if record["query_id"] == query_id
+        )
+    } == {}

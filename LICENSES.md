@@ -20,11 +20,41 @@ This development-environment snapshot was read from installed package metadata o
 | SciPy | 1.18.0 | BSD-3-Clause; wheel contains additional notices |
 | SQLAlchemy | 2.0.51 | MIT |
 | Uvicorn | 0.51.0 | BSD-3-Clause |
-| Streamlit | 1.59.2 | Apache-2.0 |
 | Matplotlib | 3.11.0 | PSF-based license |
 | pandas | 2.3.3 | BSD-3-Clause |
 
 Exact versions in a release are determined by the built environment, not this table. Generate and archive a full transitive SBOM/license report from the release wheelhouse or image before distribution.
+
+## Locked frontend direct dependencies
+
+The former Streamlit runtime has been removed. The replacement frontend is locked by
+`frontend/pnpm-lock.yaml`; the following direct runtime/toolchain inventory was read from
+`frontend/package.json` on 2026-07-23. It does not replace the transitive notices required for a
+release.
+
+| Package | Locked version | Declared license family |
+| --- | ---: | --- |
+| Next.js | 16.2.11 | MIT |
+| React / React DOM | 19.2.8 / 19.2.8 | MIT |
+| TanStack Query | 5.101.4 | MIT |
+| React Hook Form | 7.82.0 | MIT |
+| Hook Form Resolvers | 5.4.0 | MIT |
+| React-Konva / Konva | 19.2.5 / 10.3.0 | MIT |
+| Radix UI components | package-specific locked versions | MIT |
+| clsx | 2.1.1 | MIT |
+| Zustand | 5.0.14 | MIT |
+| Zod | 4.4.3 | MIT |
+| openapi-fetch | 0.17.0 | MIT |
+| Tailwind CSS | 4.3.3 | MIT |
+| Lucide React | 1.26.0 | ISC |
+
+The lockfile also pins security overrides for the production transitive dependencies PostCSS
+`8.5.10` (MIT) and sharp `0.35.0` (Apache-2.0). A release SBOM must additionally preserve the
+native libvips notices bundled by sharp.
+
+Development-only packages such as TypeScript, ESLint, Vitest, Playwright and
+`openapi-typescript` are also locked in the pnpm lockfile and must be included in the release
+SBOM/license review when their code or browser binaries enter a distributed artifact.
 
 ## Optional heavyweight dependencies
 
@@ -48,3 +78,11 @@ Every model weight, model card, demo image, paper, knowledge document, embedding
 - target registry/document ID.
 
 Placeholder directories and example JSON files are not licensed scientific assets. Never replace a missing external asset with fabricated bytes merely to make a health check green.
+
+## Project model assets
+
+| Asset | Identity | Current permission evidence |
+| --- | --- | --- |
+| `model_artifacts/weights/unet-large-optimized-v1.pt` | SHA-256 `007d9a16bf31e5f960160c52eefa938b83feeac2e6c0d7dec9c8670a38626e05`; delivered by project developer 郭境濠 on 2026-07-23 | No separate license, author/custody ledger, or written redistribution grant was included in `ModelAssets-large.zip`. It is tracked at the project owner's request for NanoLoop Agent integration. Do not infer permission for third-party redistribution, commercial use, or dataset/model sublicensing until the missing record is supplied and reviewed. |
+| `model_artifacts/weights/unet-small-balanced-v1.pt` | SHA-256 `09d1818c72652179e2590897cf409f7691e18e5e1a0f55476f90f7369a03171d`; compatibility re-export from checkpoint SHA-256 `915911107c82c01ff7d37746f4fcce6db39d40659cfb93e059e14b18134ba008`, delivered by project developer 郭境濠 on 2026-07-23 | `ModelAssets-small-a.zip` included no separate model/data license, custody ledger or general redistribution grant. The compatible runtime is tracked at the project owner's explicit request for NanoLoop Agent repository integration. This record does not grant third-party redistribution, commercial use or dataset/model sublicensing rights. |
+| Large A/B historical evaluation delivery | Archive identities and sanitized pixel evidence are recorded in `model_artifacts/evidence/unet-large-optimized-v1/delivery-audit-2026-07-23.json`; raw packages, SEM images, human masks, probabilities and SQLite files are not committed | `ModelAssets-large-a.zip`, `ModelAssets-large-b.zip` and `large-unet-independent-evaluation-v1.tar.gz` contained no separate model/data license, custody ledger or written redistribution grant. Their raw and derived private-image content remains external. The repository record is limited to hashes, counts, metrics and integration conclusions. |
