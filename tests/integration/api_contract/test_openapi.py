@@ -21,6 +21,14 @@ def test_openapi_contains_the_frozen_v1_surface(api_harness: ApiHarness) -> None
         ("/api/v1/runs/{run_id}/corrected-mask", "post"),
         ("/api/v1/runs/{run_id}/review", "post"),
         ("/api/v1/analyses/{job_id}/query", "post"),
+        ("/api/v1/analyses/{job_id}/queries", "get"),
+        ("/api/v1/analyses/{job_id}/conversations", "post"),
+        ("/api/v1/analyses/{job_id}/conversations", "get"),
+        ("/api/v1/analyses/{job_id}/conversations/{conversation_id}", "get"),
+        (
+            "/api/v1/analyses/{job_id}/conversations/{conversation_id}/messages",
+            "post",
+        ),
         ("/api/v1/knowledge/documents", "post"),
         ("/api/v1/knowledge/documents", "get"),
         ("/api/v1/knowledge/documents/{doc_id}", "patch"),
@@ -66,4 +74,6 @@ def test_file_success_is_binary_not_json_envelope(api_harness: ApiHarness) -> No
     schema = api_harness.client.get("/openapi.json").json()
     response = schema["paths"]["/api/v1/files/{token}"]["get"]["responses"]["200"]
     binary = response["content"]["application/octet-stream"]["schema"]
+    preview = response["content"]["image/png"]["schema"]
     assert binary == {"type": "string", "format": "binary"}
+    assert preview == {"type": "string", "format": "binary"}

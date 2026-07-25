@@ -1,11 +1,20 @@
 "use client";
 
-import { Download, FileQuestion, ImageOff, Minus, Plus, ScanLine } from "lucide-react";
+import {
+  Check,
+  Download,
+  FileQuestion,
+  ImageOff,
+  Minus,
+  Plus,
+  ScanLine
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { fetchArtifact, toBffArtifactUrl } from "@/lib/api/client";
 import { errorMessage } from "@/lib/api/errors";
+import type { InstanceArtifact } from "@/lib/results/instance-artifact";
 
 type PreviewState =
   | { source: string | null; status: "loading" }
@@ -16,11 +25,15 @@ type PreviewState =
 export function ArtifactPreview({
   url,
   alt,
-  filename
+  filename,
+  mode = "standard",
+  instances = null
 }: {
   url: string | null | undefined;
   alt: string;
   filename: string;
+  mode?: "standard" | "probability" | "instances";
+  instances?: InstanceArtifact | null;
 }) {
   const [state, setState] = useState<PreviewState>({
     source: null,
@@ -28,15 +41,16 @@ export function ArtifactPreview({
   });
   const [fit, setFit] = useState(true);
   const [zoom, setZoom] = useState(1);
+  const [copiedInstance, setCopiedInstance] = useState<number | null>(null);
 
   useEffect(() => {
     if (!url) return;
     let active = true;
     let objectUrl: string | null = null;
-    void fetchArtifact(url)
+    void fetchArtifact(url, { preview: true })
       .then(async (response) => {
         const contentType = response.headers.get("content-type") || "application/octet-stream";
-        if (!contentType.startsWith("image/") || contentType.includes("tiff")) {
+        if (!contentType.startsWith("image/")) {
           if (active) setState({ source: url, status: "unsupported", contentType });
           return;
         }
@@ -67,6 +81,11 @@ export function ArtifactPreview({
 
   const visibleState: PreviewState =
     state.source === url ? state : { source: url, status: "loading" };
+
+  async function copyInstance(instanceIndex: number) {
+    await navigator.clipboard.writeText(String(instanceIndex));
+    setCopiedInstance(instanceIndex);
+  }
 
   if (visibleState.status === "ready") {
     return (
@@ -115,14 +134,61 @@ export function ArtifactPreview({
           </button>
         </div>
         <div className={`artifact-scroll${fit ? " is-fit" : " is-actual"}`}>
-          {/* Signed bytes render only from a short-lived same-origin object URL. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            className="artifact-image"
-            src={visibleState.objectUrl}
-            alt={alt}
+          <div
+            className="artifact-image-stack"
             style={{ transform: `scale(${zoom})` }}
-          />
+          >
+            {/* Signed bytes render only from a short-lived same-origin object URL. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="artifact-image"
+              src={visibleState.objectUrl}
+              alt={alt}
+            />
+            {mode === "instances" && instances?.labels.length ? (
+              <div className="instance-label-layer" aria-label="可交互实例编号">
+                {instances.labels.map((instance) => (
+                  <button
+                    type="button"
+                    className={
+                      copiedInstance === instance.instanceIndex
+                        ? "instance-label copied"
+                        : "instance-label"
+                    }
+                    key={instance.instanceIndex}
+                    style={{
+                      left: `${instance.xPercent}%`,
+                      top: `${instance.yPercent}%`
+                    }}
+                    onClick={() => void copyInstance(instance.instanceIndex)}
+                    aria-label={`复制实例编号 ${instance.instanceIndex}`}
+                    title={`实例 ${instance.instanceIndex} · 点击复制`}
+                  >
+                    <span>
+                      {copiedInstance === instance.instanceIndex ? (
+                        <Check size={11} />
+                      ) : (
+                        instance.instanceIndex
+                      )}
+                    </span>
+                    <small>
+                      实例 {instance.instanceIndex}
+                      {instance.confidence === null
+                        ? " · 无置信度"
+                        : ` · 置信度 ${(instance.confidence * 100).toFixed(1)}%`}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {mode === "probability" ? (
+            <div className="probability-legend" aria-label="置信度色阶">
+              <span>低 0</span>
+              <i />
+              <span>高 1</span>
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -133,11 +199,7 @@ export function ArtifactPreview({
       <div className="artifact-fallback">
         <FileQuestion size={22} />
         <strong>此制品仅支持下载审查</strong>
-        <p>
-          {visibleState.contentType.includes("tiff")
-            ? "浏览器没有统一的 TIFF 预览能力。"
-            : "概率数组或结构化制品不是可直接显示的图片。"}
-        </p>
+        <p>概率数组或结构化制品不是可直接显示的图片。</p>
         <Button asChild size="sm">
           <a href={toBffArtifactUrl(url) || "#"} download={filename}>
             <Download size={14} />下载原始制品
@@ -153,6 +215,11 @@ export function ArtifactPreview({
         <ImageOff size={22} />
         <strong>图层暂时无法载入</strong>
         <p>{visibleState.message}</p>
+        <Button asChild size="sm">
+          <a href={toBffArtifactUrl(url) || "#"} download={filename}>
+            <Download size={14} />下载原始制品
+          </a>
+        </Button>
       </div>
     );
   }

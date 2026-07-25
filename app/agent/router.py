@@ -1,15 +1,15 @@
-"""Deterministic first-pass classifier for data, knowledge, and mixed questions.
+"""Deterministic first-pass classifier for conversational and evidence questions.
 
 Metric words such as ``密度`` or ``分布`` occur in both scientific-literature
 questions and requests about the caller's measurements.  Treating those words as
-standalone data intent turns ordinary knowledge questions into mixed queries.  A
-data route therefore requires either an experimental-scope anchor (for example
-``我们这张图``), an explicit quantitative operation, or an overview/review
-command.
+standalone data intent turns ordinary questions into tool calls.  NanoLoop is a
+general assistant first: a data route requires an experimental-scope anchor or
+quantitative operation, while RAG requires an explicit request for sources.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.contracts.enums import QueryType
@@ -20,12 +20,17 @@ _DATA_METRIC_SIGNALS = (
     "颗粒密度",
     "number density",
     "颗粒数",
+    "颗粒",
     "particle count",
     "平均粒径",
     "mean diameter",
     "粒径",
     "覆盖率",
     "coverage",
+    "周长密度",
+    "边界密度",
+    "perimeter density",
+    "boundary density",
     "周长",
     "数量",
     "密度",
@@ -44,6 +49,7 @@ _DATA_SCOPE_SIGNALS = (
     "哪组",
     "哪张",
     "哪个样品",
+    "哪个模型",
     "任务",
     "结果",
     "数据",
@@ -76,6 +82,8 @@ _DATA_COMMAND_SIGNALS = (
     "当前结果",
     "当前数据",
     "任务概览",
+    "概括当前任务",
+    "总结当前任务",
     "结果概览",
     "数据概览",
     "结果汇总",
@@ -134,7 +142,58 @@ _KNOWLEDGE_SIGNALS = (
     "property",
     "mechanism",
 )
+_RAG_REQUEST_SIGNALS = (
+    "文献",
+    "知识库",
+    "已有研究",
+    "研究报道",
+    "论文",
+    "引用",
+    "出处",
+    "来源",
+    "检索",
+    "查资料",
+    "有依据",
+    "reference",
+    "references",
+    "literature",
+    "knowledge base",
+    "reported",
+    "source",
+    "citation",
+)
 _CONTEXTUAL_MATERIAL_QUESTIONS = ("这个材料", "该材料", "这种材料")
+_GENERAL_CHAT_SIGNALS = (
+    "你好",
+    "您好",
+    "hello",
+    "hi",
+    "你是谁",
+    "能做什么",
+    "怎么用",
+    "如何使用",
+    "这个系统",
+    "当前页面",
+    "下一步",
+    "操作",
+    "帮助",
+    "概括当前任务",
+    "总结当前任务",
+)
+_FOLLOW_UP_PREFIXES = ("那", "那么", "这个", "这种", "它", "为什么", "呢", "再说")
+_EVIDENCE_FOLLOW_UP_SIGNALS = (
+    "这个差异",
+    "这种差异",
+    "上述差异",
+    "这个结果",
+    "这种结果",
+    "上述结果",
+    "刚才的结果",
+    "这个数",
+    "这个数据",
+    "这些数据",
+)
+_MATERIAL_TOKEN = re.compile(r"\b(?:La|Nd|Ba|Sr|Ca)[A-Z][A-Za-z0-9]*\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +216,7 @@ class QueryRouter:
         question: str,
         *,
         material_context: MaterialContext | None = None,
+        previous_query_type: QueryType | None = None,
     ) -> RouteDecision:
         normalized = question.casefold().strip()
         metrics = tuple(signal for signal in _DATA_METRIC_SIGNALS if signal in normalized)
@@ -171,20 +231,40 @@ class QueryRouter:
             else ()
         )
         knowledge = tuple(signal for signal in _KNOWLEDGE_SIGNALS if signal in normalized)
-        contextual = self.requires_material_context(question)
-        has_material = material_context is not None and bool(
-            material_context.formula or material_context.name or material_context.aliases
+        rag_request = tuple(
+            signal for signal in _RAG_REQUEST_SIGNALS if signal in normalized
         )
+        if _MATERIAL_TOKEN.search(question):
+            knowledge = tuple(dict.fromkeys((*knowledge, "material token")))
+        contextual = self.requires_material_context(question)
         if data and knowledge:
             return RouteDecision(QueryType.MIXED, 0.95, False, data, knowledge)
+        if (
+            "为什么" in normalized
+            and previous_query_type in {QueryType.ANALYSIS_DATA, QueryType.MIXED}
+            and any(signal in normalized for signal in _EVIDENCE_FOLLOW_UP_SIGNALS)
+        ):
+            return RouteDecision(QueryType.MIXED, 0.92, False, data, knowledge)
         if data:
             return RouteDecision(QueryType.ANALYSIS_DATA, 0.90, False, data, knowledge)
-        if knowledge or (contextual and has_material):
+        if rag_request:
             return RouteDecision(QueryType.MATERIAL_KNOWLEDGE, 0.90, False, data, knowledge)
-        return RouteDecision(
-            QueryType.AUTO,
-            0.0,
-            True,
-            data,
-            knowledge,
-        )
+        if (
+            previous_query_type is QueryType.MATERIAL_KNOWLEDGE
+            and normalized.startswith(_FOLLOW_UP_PREFIXES)
+            and "material token" in knowledge
+        ):
+            return RouteDecision(
+                QueryType.MATERIAL_KNOWLEDGE,
+                0.82,
+                False,
+                data,
+                knowledge,
+            )
+        if any(signal in normalized for signal in _GENERAL_CHAT_SIGNALS):
+            return RouteDecision(QueryType.GENERAL_CHAT, 0.95, False, data, knowledge)
+        # Contextual material questions, scientific background questions, and
+        # ordinary open-ended requests remain conversational unless the user
+        # explicitly asks for current measurements or sourced knowledge.
+        confidence = 0.75 if contextual or knowledge else 0.55
+        return RouteDecision(QueryType.GENERAL_CHAT, confidence, False, data, knowledge)

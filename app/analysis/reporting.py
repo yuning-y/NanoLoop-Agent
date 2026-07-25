@@ -290,6 +290,12 @@ class ReportWriter:
                         ),
                         "image_sha256": run.configuration.image_sha256,
                         "scale_nm_per_pixel": run.configuration.scale_nm_per_pixel,
+                        "scale_source": run.configuration.scale_source,
+                        "sem_metadata": (
+                            run.configuration.sem_metadata.model_dump(mode="json")
+                            if run.configuration.sem_metadata is not None
+                            else None
+                        ),
                         "resolved_postprocess": (
                             run.configuration.resolved_postprocess.model_dump(mode="json")
                             if run.configuration.resolved_postprocess is not None
@@ -436,6 +442,8 @@ class ReportWriter:
             "mean_equivalent_diameter_px",
             "mean_equivalent_diameter_nm",
             "coverage_ratio",
+            "perimeter_density_px",
+            "perimeter_density_um",
             "runtime_ms",
         )
         buffer = io.StringIO(newline="")
@@ -468,6 +476,12 @@ class ReportWriter:
                             summary.mean_equivalent_diameter_nm if summary else None
                         ),
                         "coverage_ratio": summary.coverage_ratio if summary else None,
+                        "perimeter_density_px": (
+                            summary.perimeter_density_px if summary else None
+                        ),
+                        "perimeter_density_um": (
+                            summary.perimeter_density_um if summary else None
+                        ),
                         "runtime_ms": run.runtime_ms,
                     }
                 )
@@ -506,6 +520,24 @@ class ReportWriter:
                 if summary.mean_equivalent_diameter_nm is not None
             )
             statuses = [run.quality.status for run in group if run.quality is not None]
+            physical_perimeter_terms: list[tuple[float, float]] = []
+            for run in group:
+                summary = run.summary
+                image = images.get(run.image_id)
+                if (
+                    summary is None
+                    or summary.perimeter_density_um is None
+                    or image is None
+                    or image.scale_nm_per_pixel is None
+                ):
+                    physical_perimeter_terms = []
+                    break
+                area_um2 = (
+                    summary.roi_area_px * (image.scale_nm_per_pixel / 1000.0) ** 2
+                )
+                physical_perimeter_terms.append(
+                    (summary.perimeter_density_um * area_um2, area_um2)
+                )
             rows.append(
                 {
                     "sample_id": sample_id,
@@ -519,6 +551,22 @@ class ReportWriter:
                         sum(summary.coverage_ratio * summary.roi_area_px for summary in summaries)
                         / total_roi
                         if total_roi
+                        else None
+                    ),
+                    "perimeter_density_px_weighted": (
+                        sum(
+                            summary.perimeter_density_px * summary.roi_area_px
+                            for summary in summaries
+                        )
+                        / total_roi
+                        if total_roi
+                        else None
+                    ),
+                    "perimeter_density_um_weighted": (
+                        sum(perimeter for perimeter, _ in physical_perimeter_terms)
+                        / sum(area for _, area in physical_perimeter_terms)
+                        if physical_perimeter_terms
+                        and sum(area for _, area in physical_perimeter_terms) > 0
                         else None
                     ),
                     "mean_equivalent_diameter_px_weighted": (
@@ -559,6 +607,8 @@ class ReportWriter:
             "roi_area_px_total",
             "number_density_px2",
             "coverage_ratio_weighted",
+            "perimeter_density_px_weighted",
+            "perimeter_density_um_weighted",
             "mean_equivalent_diameter_px_weighted",
             "mean_equivalent_diameter_nm_weighted",
             "worst_quality_status",

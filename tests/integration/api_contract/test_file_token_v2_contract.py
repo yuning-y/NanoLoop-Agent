@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -177,21 +178,30 @@ def _create_analysis(
     harness: PrincipalFileHarness,
     *,
     actor: str = "owner",
+    filename: str = "principal-original.png",
+    image_format: str = "PNG",
+    image_mode: str = "L",
+    color: int = 75,
 ) -> tuple[bytes, dict[str, object]]:
     image_buffer = BytesIO()
-    Image.new("L", (32, 24), color=75).save(image_buffer, format="PNG")
+    Image.new(image_mode, (32, 24), color=color).save(image_buffer, format=image_format)
     image_bytes = image_buffer.getvalue()
+    media_type = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "TIFF": "image/tiff",
+    }[image_format]
     response = harness.client.post(
         "/api/v1/analyses",
         headers=_headers(harness, actor),
-        files={"files": ("principal-original.png", image_bytes, "image/png")},
+        files={"files": (filename, image_bytes, media_type)},
         data={
             "metadata_json": json.dumps(
                 {
                     "job_name": "Principal file-token contract",
                     "images": [
                         {
-                            "filename": "principal-original.png",
+                            "filename": filename,
                             "sample_id": "principal_file_contract",
                             "scale": {"mode": "pixel_only"},
                         }
@@ -340,6 +350,14 @@ def test_principal_original_url_is_v2_subject_bound_and_secret_free(
     assert "attachment" in downloaded.headers["content-disposition"]
     assert "principal-original.png" in downloaded.headers["content-disposition"]
 
+    native_preview = harness.client.get(
+        f"/api/v1/files/{created_token}?preview=1",
+        headers=_headers(harness, "owner"),
+    )
+    assert native_preview.status_code == 200
+    assert native_preview.headers["content-type"] == "image/png"
+    assert native_preview.content == original_bytes
+
     with harness.database.session() as session:
         storage_path = SqlAlchemyRepositorySet(session).images.get_storage_path_scoped(
             job_id,
@@ -371,6 +389,95 @@ def test_principal_original_url_is_v2_subject_bound_and_secret_free(
     assert legacy_token not in old_v1.text
     assert storage_path not in old_v1.text
     assert calls == {"decode": 0, "open": 0}
+
+
+def test_tiff_preview_is_png_and_raw_download_remains_unchanged(
+    principal_file_harness: PrincipalFileHarness,
+) -> None:
+    harness = principal_file_harness
+    original_bytes, created = _create_analysis(
+        harness,
+        filename="principal-original.tif",
+        image_format="TIFF",
+        image_mode="I;16",
+        color=4096,
+    )
+    images = created["images"]
+    assert isinstance(images, list)
+    image = images[0]
+    assert isinstance(image, dict)
+    token = _token_from_url(image["original_download_url"])
+
+    preview = harness.client.get(
+        f"/api/v1/files/{token}?preview=1",
+        headers=_headers(harness, "owner"),
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["content-type"] == "image/png"
+    assert preview.headers["cache-control"] == "private, no-store"
+    assert preview.headers["content-disposition"] == 'inline; filename="preview.png"'
+    assert preview.headers["x-content-type-options"] == "nosniff"
+    with Image.open(BytesIO(preview.content)) as rendered:
+        assert rendered.format == "PNG"
+        assert rendered.mode == "L"
+        assert rendered.size == (32, 24)
+
+    downloaded = harness.client.get(
+        f"/api/v1/files/{token}",
+        headers=_headers(harness, "owner"),
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "image/tiff"
+    assert downloaded.content == original_bytes
+
+
+def test_probability_array_preview_is_fixed_scale_png(
+    principal_file_harness: PrincipalFileHarness,
+) -> None:
+    harness = principal_file_harness
+    _original_bytes, created = _create_analysis(harness)
+    job = created["job"]
+    images = created["images"]
+    assert isinstance(job, dict)
+    assert isinstance(images, list)
+    image = images[0]
+    assert isinstance(image, dict)
+    job_id = job["job_id"]
+    image_id = image["image_id"]
+    assert isinstance(job_id, str)
+    assert isinstance(image_id, str)
+
+    run_id = _create_completed_run(harness, job_id=job_id, image_id=image_id)
+    run_response = harness.client.get(
+        f"/api/v1/runs/{run_id}",
+        headers=_headers(harness, "owner"),
+    )
+    assert run_response.status_code == 200, run_response.text
+    artifacts = run_response.json()["data"]["artifacts"]
+    assert isinstance(artifacts, dict)
+    token = _token_from_url(artifacts["probability_url"])
+
+    preview = harness.client.get(
+        f"/api/v1/files/{token}?preview=1",
+        headers=_headers(harness, "owner"),
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["content-type"] == "image/png"
+    with Image.open(BytesIO(preview.content)) as rendered:
+        assert rendered.format == "PNG"
+        assert rendered.mode == "RGB"
+        assert rendered.size == (32, 24)
+        assert rendered.getpixel((0, 0)) == (68, 1, 84)
+        assert rendered.getpixel((11, 9)) != rendered.getpixel((0, 0))
+
+    downloaded = harness.client.get(
+        f"/api/v1/files/{token}",
+        headers=_headers(harness, "owner"),
+    )
+    assert downloaded.status_code == 200
+    probability = np.load(BytesIO(downloaded.content), allow_pickle=False)
+    assert probability.shape == (24, 32)
+    assert probability[9, 11] == pytest.approx(0.9)
 
 
 def test_corrected_mask_token_is_endpoint_bound_and_consumed_once(

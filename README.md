@@ -19,7 +19,7 @@ docs 为准。仓库当前达到 **工程 MVP / 内部 Alpha（M1）**：FastAPI
 
 | 当前阶段 | 已有工程基线 | M2 真实可演示 MVP 的主要阻塞 |
 | --- | --- | --- |
-| M1 工程 MVP / 内部 Alpha | 需求矩阵为 `implemented 10 / partial 4 / external-blocked 0`；Large 与 Small-A U-Net 运行资产已接入，并在本机公开合成图上完成 live UI 运行、比较与导出；Large 历史独立集像素指标已按交付字节复核；仓库内提供 30 题公开 RAG 工程回归包 | 两个 U-Net 已通过 CPU 运行校验并登记为 `ready`，其余三个模型仍为 `unavailable`；仍缺 Small-B、共同授权 SEM/GT 与当前分割 bundle 的完整科学重跑、正式外部语料及许可台账，以及目标部署环境上的正式 FAISS 重启与无降级 E2E |
+| M1 工程 MVP / 内部 Alpha | 需求矩阵为 `implemented 10 / partial 4 / external-blocked 0`；Large 与 Small-A U-Net 运行资产已接入，并在本机公开合成图上完成 live UI 运行、比较与导出；Agglomerated-A 精确私有 bundle 已完成 Gateway→Analysis 冒烟；仓库内提供 30 题公开 RAG 工程回归包 | 公开目录中两个 U-Net 登记为 `ready`，其余三个模型仍为 `unavailable`；Agglomerated-A 只允许通过外部私有 registry 运行。仍缺 Small-B、共同授权 SEM/GT 与当前分割 bundle 的完整科学重跑、正式外部语料及许可台账，以及目标部署环境上的正式 FAISS 重启与无降级 E2E |
 
 第一次演示请从[用户测试与演示指南](docs/USER_ACCEPTANCE_GUIDE.md)开始；本次真实操作对象、运行
 ID、数值、数据库回查、自动化结果和限制见
@@ -35,7 +35,13 @@ ID、数值、数据库回查、自动化结果和限制见
 - 模型注册会校验权重并计算配置、模型卡和 Adapter 源码哈希；通过验证的完整 bundle 先发布到只读、内容寻址的本地 snapshot，再由 Adapter 加载。推理只消费一次读取并核对过的原图字节，相同 model/device/provenance 的可变 Adapter 通过 prediction lease 串行使用，预测期间不会被并发卸载。U-Net 已支持可配置 patch/stride 的重叠滑窗与加权融合。
 - ROI 页使用 React-Konva 画布与数值编辑器，支持拖拽建框、选择/删除、有效/无效区显示、原图半开坐标换算及 revision CAS 保存；纯几何有 Vitest，本机 Next.js → BFF → FastAPI → SQLite 的数值框保存、revision 1 与刷新持久化已 live 验收。多浏览器矩阵、409 并发冲突的目标环境演练仍需单独留证。
 - 缺少比例尺时仅给像素单位，不伪造 nm/µm 结果。
-- 数据问答支持排序、分组比较、分布、异常与模型比较；同图多个完成 run 未显式选择时会先澄清，跨图粒径比较缺少可比物理尺度时会拒绝给出误导结果。
+- 数据问答支持计数、粒径、覆盖率、颗粒数密度和周长密度，以及排序、分组比较、分布、异常与模型比较；密度类跨图比较优先使用物理单位，缺少可比尺度时会拒绝给出误导结果。
+- 旧 `/query` 调用仍写入带 actor、图像和 run 作用域的数据库审计；新的科研助手使用独立、持久化的任务内会话和消息历史，不会把旧单次问答静默注入新会话。
+- 科研助手支持任务内多轮对话、历史重载和通用对话优先路由。本地 Qwen3 可回答普通交流、
+  写作、编程和一般科学背景；只有问题明确涉及当前实验数据或要求文献/知识库证据时才调用对应
+  工具。每个当前实验数值句必须引用 `[D#]`，证据模式中的材料事实句必须引用 `[C#]`。模型
+  不可用、JSON/引用/数值/单位校验失败时自动回退可信模板或摘录，并保存
+  `fallback_used`、模型身份、耗时和版本化 prompt 摘要，不保存思维链。
 - 材料不匹配或证据不足时返回明确的澄清/证据不足结果，不跨材料拼接引用；多材料且未选图像时返回候选材料，引用保留页码、chunk、来源类型和规范引文。
 - 知识库支持导入、列出、启用/禁用和重建；前端可管理状态。可选向量 runtime 已实现本地只读 SentenceTransformers、原子 FAISS generation、manifest/数据库映射校验、原始 cosine 门槛和 keyword-only 降级；连续中文在 `unicode61` 无命中时使用有界 CJK n-gram 回退。仓库不提交 embedding snapshot、FAISS 文件或正式外部语料，因此仍不宣称生产向量 RAG 已交付。
 - 模型 API 支持 family、variant、quality tier、状态和材料筛选，并展示指标上下文、预/后处理、备注与健康原因；前端目录只允许选择后端标记为 `ready` 的条目，推荐和创建运行分开确认。
@@ -43,7 +49,7 @@ ID、数值、数据库回查、自动化结果和限制见
 - 导出按所选成员路径、精确字节 SHA-256 和长度生成内容地址；同一数据库/制品快照复用完全相同的确定性 ZIP，内容变化生成新地址，已签发令牌对应的旧字节不会被覆盖。
 - 图片在深度解码前先检查尺寸/像素数；知识摄取对 PDF 页数、提取字符数、单文档 chunk、材料别名和向量语料规模设有上限，embedding 按批处理；大粒径分布在 SQL 中精确聚合，只返回有上限的确定性证据抽样。
 - 启动恢复对普通陈旧运行复制其不可变科学输入；若人工修正掩膜运行在崩溃后缺少原始外部制品，则父运行明确失败并要求人工处理，不会用 JSON 配置伪造一个不可复现子运行。
-- Large 与 Small-A U-Net 的部署用 TorchScript 已按项目负责人要求纳入仓库并由哈希锁定；源 checkpoint 只记录身份、不重复提交。Large 的三张历史独立测试视野像素指标已从交付 prediction/GT 字节重新计算，见[Large A/B 审计](docs/model-assets-large-a-b-acceptance-2026-07-23.md)。Small-A 从严格匹配的 checkpoint 以 PyTorch 2.6 重新导出兼容制品，并通过 2.6/2.13、全图/ROI 与确定性运行检查，见[Small-A 审计](docs/model-assets-small-a-acceptance-2026-07-23.md)；Small-B 科学校准与独立评测尚未交付。Agglomerated U-Net、YOLO-Seg、SAM2、生产知识语料、向量索引和本地大模型仍是外部资产；`ready` 只代表运行 bundle 可用，不代表科研验收通过。
+- Large 与 Small-A U-Net 的部署用 TorchScript 已按项目负责人要求纳入仓库并由哈希锁定；源 checkpoint 只记录身份、不重复提交。Large 的三张历史独立测试视野像素指标已从交付 prediction/GT 字节重新计算，见[Large A/B 审计](docs/model-assets-large-a-b-acceptance-2026-07-23.md)。Small-A 从严格匹配的 checkpoint 以 PyTorch 2.6 重新导出兼容制品，并通过 2.6/2.13、全图/ROI 与确定性运行检查，见[Small-A 审计](docs/model-assets-small-a-acceptance-2026-07-23.md)；Small-B 科学校准与独立评测尚未交付。Agglomerated-A 的精确外部私有 bundle 已通过 CPU Gateway→Analysis 冒烟，见[Agglomerated-A 审计](docs/model-assets-agglomerated-a-acceptance-2026-07-24.md)，但公开仓库仍不分发该权重。YOLO-Seg、SAM2、生产知识语料、向量索引和本地大模型也仍是外部资产；`ready` 只代表运行 bundle 可用，不代表科研验收通过。
 
 详细覆盖情况见 [需求追踪表](docs/requirements-traceability.md)，RAG 技术合同见 [RAG 与检索功能开发指南](docs/RAG_RETRIEVAL_DEVELOPMENT_GUIDE.md)，外部模型与长期接手方式见 [模型与 RAG 交接](docs/model-rag-handoff.md)，单机/公网/多实例的发布边界见 [生产就绪说明](docs/PRODUCTION_READINESS.md)，全部入口见 [文档索引](docs/README.md)。专项指南中的旧时间表、人员分工或旧前端描述只作历史参考。
 
@@ -112,6 +118,26 @@ docker compose logs -f api frontend
 `torch 2.13.0`/`torchvision 0.28.0`，并串行构建 API 与前端，避免 CPU 部署误拉 CUDA
 运行时或并发重型构建。构建期间不要在其他终端重复执行同一目标。
 
+基础 Compose 会默认连接宿主机 Ollama 中的
+`qwen3:4b-instruct-2507-q4_K_M`。因此在该模型已经安装并启动时，常用启动命令无需额外
+overlay：
+
+```bash
+NANOLOOP_API_EXTRAS=models docker compose up -d --no-build
+```
+
+若本机使用其他已安装的 Qwen3 tag，可显式覆盖：
+
+```bash
+export NANOLOOP_COMPOSE_LLM_MODEL="替换为 ollama list 中的精确 Qwen3 tag"
+NANOLOOP_API_EXTRAS=models docker compose up -d --no-build
+```
+
+Compose 不下载模型、不启动 Ollama 容器；容器通过 `host.docker.internal` 访问宿主机。
+模型不可达时会明确进入证据降级模式，不会伪装成通用 AI 对话。完整的
+macOS、Windows PowerShell、Linux 启停、健康检查、真实 smoke 和 extractive 回退说明见
+[本地 Qwen3 科研对话指南](docs/LOCAL_LLM_CHAT_GUIDE.md)。
+
 默认只绑定 `127.0.0.1`。API 会拒绝不受信任/歧义的 Host，并对浏览器写请求校验 Origin 与 `Sec-Fetch-Site`；这些网络边界控制本身不构成身份认证。应用已经支持由运维 CLI 预置的 tenant/principal 可撤销凭据，并对 Analysis 聚合、Query 和 v2 文件能力执行相应的租户、主体、角色或用途约束，但仍不提供交互式用户登录。knowledge 尚未完成同等级租户隔离，因此 principal 模式下知识管理与知识问答全部 fail-closed 为 `503`；不得用 disabled/shared-key 的全局语料行为冒充多租户授权。若要开放到其他机器，仍必须先在受信任反向代理上增加 TLS、所需的用户认证与授权、边缘限速和访问日志，再显式设置 `NANOLOOP_BIND_HOST`。
 
 API 使用单个 Uvicorn worker、SQLite WAL 和进程内有界 worker pool。数据库中的 `QUEUED` 记录是持久事实来源，队列溢出会由调度器继续领取。当前支持单 API 容器；多副本部署需要把数据库、导出锁和调度所有权迁移到共享基础设施。
@@ -140,6 +166,14 @@ python scripts/mvp_fixture_smoke.py
 `unavailable`。仓库内 Large 与 Small-A TorchScript 在安装所需依赖且 bundle 校验通过时为
 `ready`，不属于本段降级说明。实现边界与接手说明见
 [MVP 后端交接记录](docs/MVP_BACKEND_HANDOFF.md)。
+
+本地 Qwen3 就绪检查和真实多轮 smoke：
+
+```bash
+export LLM_MODEL="替换为精确 tag"
+.venv/bin/python scripts/check_local_llm.py
+NANOLOOP_SMOKE_JOB_ID="job_..." .venv/bin/python scripts/smoke_local_llm_chat.py
+```
 
 完整本地门禁：
 

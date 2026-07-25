@@ -10,7 +10,14 @@ const sha = "a".repeat(64);
 const exportToken = "signed-export-token";
 const exportBytes = Buffer.from("nanoloop-e2e-trusted-export");
 const exportSha = createHash("sha256").update(exportBytes).digest("hex");
+const overlayToken = "signed-overlay-token";
+const maskToken = "signed-mask-token";
+const imageBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
+  "base64"
+);
 const knowledgeDocId = "doc-e2e";
+const conversationId = "conv-e2e";
 
 const knowledgeDocument = {
   doc_id: knowledgeDocId,
@@ -75,7 +82,7 @@ const model = {
   quality_tier: "validated",
   version: "1.0.0",
   status: "ready",
-  supports_box_prompt: true,
+  supports_box_prompt: false,
   preprocess_profile: "grayscale-v1",
   postprocess_profile: "large-particle-v1",
   default_threshold: 0.55,
@@ -144,7 +151,10 @@ const run = {
     provenance_status: "complete",
     provenance_warnings: []
   },
-  artifacts: {},
+  artifacts: {
+    mask_url: `/api/v1/files/${maskToken}`,
+    overlay_url: `/api/v1/files/${overlayToken}`
+  },
   quality: {
     status: "pass",
     reasons: [],
@@ -198,14 +208,19 @@ const reviewRun = {
   }
 };
 
-async function installApiMock(page: Page) {
+async function installApiMock(
+  page: Page,
+  options: { failCreateRun?: boolean } = {}
+) {
   let hasRun = false;
   let hasReviewRun = false;
   let savedBoxes: Array<Record<string, unknown>> = [];
   let boxRevision = 0;
   let knowledgeDocuments: Array<typeof knowledgeDocument> = [];
+  let conversationMessages: Array<Record<string, unknown>> = [];
   const browserApiRequests: string[] = [];
   const captured = {
+    createAnalysisBody: null as string | null,
     boxSave: null as Record<string, unknown> | null,
     boxGets: 0,
     createRun: null as Record<string, unknown> | null,
@@ -237,12 +252,14 @@ async function installApiMock(page: Page) {
             database: { status: "healthy", detail: "ready" },
             model_registry: { status: "healthy", detail: "1 ready" },
             rag_index: { status: "healthy", detail: "ready" },
+            llm_provider: { status: "healthy", detail: "qwen3 ready" },
             version: "1.0.0"
           })
         )
       });
     }
     if (path === "analyses" && method === "POST") {
+      captured.createAnalysisBody = request.postData();
       return route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(envelope({ job, images: [image], runs: [], partial_failures: [] }))
@@ -319,8 +336,42 @@ async function installApiMock(page: Page) {
         body: JSON.stringify(envelope({ models: [model, unavailableModel] }))
       });
     }
+    if (path === "models/recommend" && method === "POST") {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(
+          envelope({
+            candidates: [
+              {
+                model_id: model.model_id,
+                score: 0.96,
+                reasons: ["ready", "general-purpose"]
+              }
+            ],
+            requires_user_confirmation: true
+          })
+        )
+      });
+    }
     if (path === `analyses/${jobId}/runs` && method === "POST") {
       captured.createRun = request.postDataJSON() as Record<string, unknown>;
+      if (options.failCreateRun) {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            request_id: "req-run-unavailable",
+            status: "error",
+            data: null,
+            error: {
+              code: "MODEL_SERVICE_UNAVAILABLE",
+              message: "模型运行服务暂时不可用",
+              details: {},
+              retryable: true
+            }
+          })
+        });
+      }
       hasRun = true;
       return route.fulfill({
         contentType: "application/json",
@@ -337,33 +388,98 @@ async function installApiMock(page: Page) {
         )
       });
     }
-    if (path === `analyses/${jobId}/query` && method === "POST") {
-      captured.query = request.postDataJSON() as Record<string, unknown>;
+    if (path === `analyses/${jobId}/conversations` && method === "GET") {
       return route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(
           envelope({
-            query_type: "mixed",
-            answer: "该运行识别到 42 个颗粒；当前知识证据仅支持保守解释。",
-            confidence: "medium",
-            outcome_code: "OK",
-            needs_clarification: false,
+            conversations: conversationMessages.length
+              ? [
+                  {
+                    conversation_id: conversationId,
+                    job_id: jobId,
+                    title: "颗粒结果",
+                    created_by: `prn_${"0".repeat(32)}`,
+                    created_at: now,
+                    updated_at: now,
+                    message_count: conversationMessages.length
+                  }
+                ]
+              : []
+          })
+        )
+      });
+    }
+    if (path === `analyses/${jobId}/conversations` && method === "POST") {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(envelope(conversationDetail()))
+      });
+    }
+    if (
+      path === `analyses/${jobId}/conversations/${conversationId}` &&
+      method === "GET"
+    ) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(envelope(conversationDetail()))
+      });
+    }
+    if (
+      path === `analyses/${jobId}/conversations/${conversationId}/messages` &&
+      method === "POST"
+    ) {
+      captured.query = request.postDataJSON() as Record<string, unknown>;
+      conversationMessages = [
+        ...conversationMessages,
+        {
+          message_id: `msg-user-${conversationMessages.length + 1}`,
+          conversation_id: conversationId,
+          role: "user",
+          content: captured.query.content,
+          query_type: "analysis_data",
+          image_id: imageId,
+          run_ids: [reviewRunId],
+          created_at: now
+        },
+        {
+          message_id: `msg-assistant-${conversationMessages.length + 2}`,
+          conversation_id: conversationId,
+          role: "assistant",
+          content: "该复核运行识别到 40 个颗粒 [D1]；当前知识证据仅支持保守解释。",
+          query_type: "analysis_data",
+          image_id: imageId,
+          run_ids: [reviewRunId],
+          confidence: "high",
+          outcome_code: "OK",
+          created_at: now,
+          evidence: {
+            llm_provider: "openai_compatible",
+            llm_model: "qwen3:test",
+            fallback_used: false,
+            generation_time_ms: 18,
+            prompt_template_id: "nanoloop-scientist-copilot-v1",
+            prompt_template_sha256: sha,
+            limitations: ["仅有单张图像"],
+            citations: [],
+            tool_calls: [],
             data_evidence: [
               {
                 tool_name: "get_run_summary",
-                validated_arguments: { run_id: runId },
-                source_run_ids: [runId],
-                aggregates: { particle_count: 42 },
+                validated_arguments: { run_id: reviewRunId },
+                source_run_ids: [reviewRunId],
+                aggregates: { particle_count: 40 },
                 rows: [],
                 units: { particle_count: "count" },
                 quality_warnings: []
               }
-            ],
-            citations: [],
-            limitations: ["仅有单张图像"],
-            tool_calls: []
-          })
-        )
+            ]
+          }
+        }
+      ];
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(envelope(conversationDetail()))
       });
     }
     if (path === `analyses/${jobId}/export` && method === "GET") {
@@ -389,6 +505,16 @@ async function installApiMock(page: Page) {
           "cache-control": "private, no-store"
         },
         body: exportBytes
+      });
+    }
+    if ([`files/${overlayToken}`, `files/${maskToken}`].includes(path) && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "cache-control": "private, no-store"
+        },
+        body: imageBytes
       });
     }
     if (path === "knowledge/documents" && method === "GET") {
@@ -471,24 +597,105 @@ async function installApiMock(page: Page) {
       }
     }
   };
+
+  function conversationDetail() {
+    return {
+      conversation_id: conversationId,
+      job_id: jobId,
+      title: "颗粒结果",
+      created_by: `prn_${"0".repeat(32)}`,
+      created_at: now,
+      updated_at: now,
+      message_count: conversationMessages.length,
+      messages: conversationMessages
+    };
+  }
 }
+
+test("auto-segments one image without requiring a task name or parameters", async ({
+  page
+}) => {
+  const { captured } = await installApiMock(page);
+  await page.goto("/");
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "lazy-user-sample.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("e2e-image")
+  });
+  await page.getByText("补充样品信息（全部选填）", { exact: true }).click();
+  await expect(page.getByText("这些图像来自同一种材料？")).toHaveCount(0);
+  await page
+    .getByLabel("选择 lazy-user-sample.png 的材料")
+    .selectOption("BaTiO3");
+  await expect(page.locator(".selected-material .formula")).toHaveAttribute(
+    "aria-label",
+    "BaTiO3"
+  );
+  await expect(
+    page.getByRole("button", { name: "自动分割 1 张图像" })
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "自动分割 1 张图像" }).click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/workspace/${jobId}\\?autorun=1&run=${runId}$`)
+  );
+  await expect(page.getByRole("heading", { name: "查看结果" })).toBeVisible();
+  await expect(page.getByText("彩色覆盖区域就是模型识别结果")).toBeVisible();
+  expect(captured.createAnalysisBody).toContain("图像分割");
+  expect(captured.createRun).toMatchObject({
+    image_ids: [imageId],
+    model_ids: [model.model_id],
+    roi_mode: "full_image",
+    inference: {
+      device: "auto",
+      seed: 42
+    }
+  });
+  expect(captured.createAnalysisBody).toContain("BaTiO3");
+});
+
+test("keeps the uploaded project reachable when automatic run creation fails", async ({
+  page
+}) => {
+  const { captured } = await installApiMock(page, { failCreateRun: true });
+  await page.goto("/");
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "recoverable-upload.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("e2e-image")
+  });
+  await page.getByRole("button", { name: "自动分割 1 张图像" }).click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/workspace/${jobId}\\?autostart_failed=`)
+  );
+  await expect(
+    page.getByRole("alert").getByText("项目已保存，但自动分割没有启动")
+  ).toBeVisible();
+  await expect(page.getByText("模型运行服务暂时不可用")).toBeVisible();
+  expect(captured.createAnalysisBody).not.toBeNull();
+  await page.getByRole("button", { name: "检查模型并重试" }).click();
+  await expect(page.getByRole("heading", { name: "开始分析" })).toBeVisible();
+});
 
 test("completes the mocked scientific workflow through verified export", async ({ page }) => {
   const { browserApiRequests, captured } = await installApiMock(page);
   await page.goto("/");
 
-  await page.getByLabel("分析任务名称").fill("LaNiO₃ 颗粒分析");
+  await page.getByLabel("任务名称").fill("LaNiO₃ 颗粒分析");
   await page.locator('input[type="file"]').setInputFiles({
     name: "sample.png",
     mimeType: "image/png",
     buffer: Buffer.from("e2e-image")
   });
-  await page.getByRole("button", { name: "创建任务" }).click();
+  await page.getByRole("button", { name: "只创建项目" }).click();
 
   await expect(page).toHaveURL(`/workspace/${jobId}`);
   await expect(page.getByRole("heading", { name: "LaNiO₃ 颗粒分析" })).toBeVisible();
 
-  await page.getByRole("button", { name: "ROI", exact: true }).click();
+  await page.getByRole("button", { name: "局部区域（可跳过）", exact: true }).click();
   await page.getByRole("button", { name: "添加" }).click();
   const roiBox = page.locator(".roi-box").first();
   await roiBox.getByText("x1", { exact: true }).locator("..").getByRole("spinbutton").fill("96");
@@ -511,12 +718,13 @@ test("completes the mocked scientific workflow through verified export", async (
   });
 
   await page.reload();
-  await page.getByRole("button", { name: "ROI", exact: true }).click();
+  await page.getByRole("button", { name: "局部区域（可跳过）", exact: true }).click();
   await expect(page.getByText("将从 revision 1 更新")).toBeVisible();
   await expect(page.locator(".roi-box").first().getByRole("spinbutton").nth(0)).toHaveValue("96");
   await expect(page.locator(".roi-box").first().getByRole("spinbutton").nth(3)).toHaveValue("360");
 
-  await page.getByRole("button", { name: "模型与运行" }).click();
+  await page.getByRole("button", { name: "开始分析" }).click();
+  await page.getByText("高级设置", { exact: true }).click();
   await expect(page.getByRole("heading", { name: model.model_id })).toBeVisible();
   await expect(page.getByRole("heading", { name: unavailableModel.model_id })).toBeVisible();
   await expect(page.getByText("模型权重校验失败：checkpoint 缺失")).toBeVisible();
@@ -524,11 +732,13 @@ test("completes the mocked scientific workflow through verified export", async (
     page.getByRole("button", { name: `选择 ${unavailableModel.model_id}` })
   ).toBeDisabled();
   await page.getByRole("button", { name: "已保存 ROI" }).click();
-  await page.getByRole("button", { name: `选择 ${model.model_id}` }).click();
-  await page.getByText("我确认使用所选模型和参数创建不可变运行").click();
-  await page.getByRole("button", { name: "创建运行" }).click();
+  await expect(
+    page.getByRole("button", { name: `取消选择 ${model.model_id}` })
+  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "开始分割", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "开始分割", exact: true }).click();
 
-  await expect(page.getByText("智能体执行时间线")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "查看结果" })).toBeVisible();
   expect(captured.createRun).toMatchObject({
     image_ids: [imageId],
     model_ids: [model.model_id],
@@ -536,41 +746,48 @@ test("completes the mocked scientific workflow through verified export", async (
     box_revisions: { [imageId]: 1 }
   });
 
-  await page.getByRole("button", { name: "结果", exact: true }).click();
   await expect(page.getByRole("heading", { name: "质量门控" })).toBeVisible();
   await expect(page.getByText("后端未报告额外风险原因。")).toBeVisible();
   await expect(
     page.locator(".metric").filter({ hasText: "颗粒数量" }).getByText("42", { exact: true })
   ).toBeVisible();
+  await page.getByText("结果不理想？调整参数或上传修正掩码").click();
   await page.getByLabel("threshold", { exact: true }).fill("0.68");
   await page.getByLabel("min_area_px", { exact: true }).fill("20");
   await page.locator(".review-panel select").first().selectOption("true");
   await page.getByRole("button", { name: "创建复核子运行" }).click();
 
-  await expect(page.getByText("智能体执行时间线")).toBeVisible();
-  await expect(page.getByText(reviewRunId, { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "查看结果" })).toBeVisible();
+  await expect(
+    page.locator(".metric").filter({ hasText: "颗粒数量" }).getByText("40", { exact: true })
+  ).toBeVisible();
   expect(captured.review).toEqual({
     threshold: 0.68,
     min_area_px: 20,
     watershed_enabled: true
   });
 
-  await page.getByRole("button", { name: "混合" }).click();
-  await page.getByLabel("询问当前实验").fill("这张图识别了多少颗粒？");
-  await page.getByRole("button", { name: "发送问题" }).click();
+  await page.getByRole("button", { name: "科研助手" }).click();
+  await page.getByLabel("发送实验问题").fill("这张图识别了多少颗粒？");
+  await page.getByRole("button", { name: "发送消息" }).click();
 
-  await expect(page.getByText("该运行识别到 42 个颗粒")).toBeVisible();
+  await expect(page.getByText("该复核运行识别到 40 个颗粒")).toBeVisible();
+  await page.getByRole("button", { name: "展开并定位证据 D1" }).click();
   await expect(page.getByText("实验数据证据")).toBeVisible();
   expect(captured.query).toMatchObject({
-    question: "这张图识别了多少颗粒？",
-    query_type: "mixed",
+    content: "这张图识别了多少颗粒？",
+    query_type: "auto",
     image_id: imageId,
-    run_ids: [runId]
+    run_ids: [reviewRunId]
   });
 
-  await page.getByRole("button", { name: "结果", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "科研助手" }).click();
+  await expect(page.getByText("该复核运行识别到 40 个颗粒")).toBeVisible();
+
+  await page.getByRole("button", { name: "查看结果", exact: true }).click();
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "导出当前及所选运行" }).click();
+  await page.getByRole("button", { name: "导出当前运行" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("nanoloop-e2e-export.zip");
   await expect(page.getByText("SHA-256 已验证，可信报告已下载。")).toBeVisible();
@@ -623,7 +840,7 @@ test("preserves an unsaved ROI when the server reports a revision conflict", asy
   const { captured, controls } = await installApiMock(page);
   await page.goto(`/workspace/${jobId}`);
 
-  await page.getByRole("button", { name: "ROI", exact: true }).click();
+  await page.getByRole("button", { name: "局部区域（可跳过）", exact: true }).click();
   await page.getByRole("button", { name: "添加" }).click();
   const roiBox = page.locator(".roi-box").first();
   await roiBox.getByText("x1", { exact: true }).locator("..").getByRole("spinbutton").fill("96");
